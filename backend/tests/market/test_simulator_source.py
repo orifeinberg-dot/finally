@@ -124,6 +124,76 @@ class TestSimulatorDataSource:
 
         await source.stop()
 
+    async def test_add_ticker_normalizes_case(self):
+        """Test that add_ticker() normalizes lowercase tickers."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["AAPL"])
+
+        await source.add_ticker("tsla")
+        assert "TSLA" in source.get_tickers()
+        assert cache.get("TSLA") is not None
+
+        await source.stop()
+
+    async def test_add_ticker_strips_whitespace(self):
+        """Test that add_ticker() strips whitespace."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["AAPL"])
+
+        await source.add_ticker("  TSLA  ")
+        assert "TSLA" in source.get_tickers()
+
+        await source.stop()
+
+    async def test_remove_ticker_normalizes_case(self):
+        """Test that remove_ticker() normalizes lowercase tickers."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["AAPL", "TSLA"])
+
+        await source.remove_ticker("tsla")
+        assert "TSLA" not in source.get_tickers()
+        assert cache.get("TSLA") is None
+
+        await source.stop()
+
+    async def test_get_price_history_returns_updates(self):
+        """Test that get_price_history() delegates to the price cache."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["AAPL"])
+
+        history = source.get_price_history("AAPL")
+        assert len(history) >= 1
+        assert history[-1].ticker == "AAPL"
+
+        await source.stop()
+
+    async def test_get_price_history_unknown_ticker(self):
+        """Test that get_price_history() returns an empty list for unknown tickers."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["AAPL"])
+
+        assert source.get_price_history("NOPE") == []
+
+        await source.stop()
+
+    async def test_get_price_history_respects_n(self):
+        """Test that get_price_history(..., n=...) limits the number of results."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.01)
+        await source.start(["AAPL"])
+
+        await asyncio.sleep(0.1)  # A handful of update cycles
+
+        history = source.get_price_history("AAPL", n=2)
+        assert len(history) <= 2
+
+        await source.stop()
+
     async def test_custom_event_probability(self):
         """Test creating source with custom event probability."""
         cache = PriceCache()

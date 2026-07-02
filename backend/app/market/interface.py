@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from .models import PriceUpdate
+
 
 class MarketDataSource(ABC):
     """Contract for market data providers.
@@ -55,3 +57,11 @@ class MarketDataSource(ABC):
     @abstractmethod
     def get_tickers(self) -> list[str]:
         """Return the current list of actively tracked tickers."""
+
+    @abstractmethod
+    def get_price_history(self, ticker: str, n: int = 60) -> list[PriceUpdate]:
+        """Return up to the last `n` price updates for a ticker, oldest first.
+
+        Used to pre-populate sparklines on page load. Returns an empty list
+        for tickers with no recorded history.
+        """

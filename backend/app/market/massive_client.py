@@ -10,6 +10,7 @@ from massive.rest.models import SnapshotMarketType
 
 from .cache import PriceCache
 from .interface import MarketDataSource
+from .models import PriceUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,9 @@ class MassiveDataSource(MarketDataSource):
 
     def get_tickers(self) -> list[str]:
         return list(self._tickers)
+
+    def get_price_history(self, ticker: str, n: int = 60) -> list[PriceUpdate]:
+        return self._cache.get_history(ticker, n)
 
     # --- Internal ---
 
