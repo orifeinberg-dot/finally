@@ -84,46 +84,32 @@ Previously `MassiveDataSource` normalized tickers (`.upper().strip()`) but `Simu
 
 ---
 
-## 4. Remaining Issues
+## 4. Remaining Issues — Resolution Status
 
-### 4.1 SSE stream has no dedicated tests (Severity: Medium)
+All five items below have since been fixed on `claude/market-data-review-fixes-20260702`.
 
-`stream.py` — the actual wire contract the frontend consumes via `EventSource` — still has no `test_stream.py`. It's the one module in the subsystem with zero direct test coverage. The logic is short (version-based change detection, disconnect handling, retry directive) but it's also the integration point most likely to silently break the sparkline/live-price feature if changed. Recommend a `httpx.ASGITransport`/`AsyncClient` test that: starts a stream, asserts the `retry: 1000` preamble, pushes a `PriceCache.update()`, and asserts an SSE `data:` frame is emitted with the expected JSON shape; plus a test that no second frame is emitted when the cache version hasn't changed.
+### 4.1 SSE stream has no dedicated tests (Severity: Medium) — **Fixed**
 
-### 4.2 `timestamp=0.0` treated as "unset" (Severity: Low)
+Added `backend/tests/market/test_stream.py` (6 tests). Note on approach: neither `httpx.ASGITransport` nor Starlette's `TestClient` (as originally suggested above) actually works for this — both fully buffer the ASGI response before returning it to the caller, so they hang forever against `_generate_events`'s genuinely infinite `while True` loop (confirmed empirically; a naive `ASGITransport`-based test hung the whole suite). Instead, the tests run the app on a real uvicorn server bound to a loopback socket and drive it with a real `httpx.AsyncClient` over the network, which gives true non-buffered streaming and real client-disconnect semantics. Coverage: the `retry: 1000` preamble, response headers, a `data:` frame with the expected JSON shape after a `PriceCache.update()`, no second frame while the cache version is unchanged, a second distinct frame after a further update, and (separately) that `create_stream_router()` returns an independent router on each call.
 
-`cache.py:42`: `ts = timestamp or time.time()`. If a caller explicitly passes `timestamp=0.0`, the falsy check silently discards it and substitutes the current time instead. In practice this only matters for a Unix-epoch timestamp (1970-01-01), which no real market data or test currently exercises, so it's low-impact — but it's a latent correctness gap relative to `timestamp is None`.
+### 4.2 `timestamp=0.0` treated as "unset" (Severity: Low) — **Fixed**
 
-### 4.3 `PriceCache.version` read outside the lock (Severity: Low)
+`cache.py`: `ts = timestamp or time.time()` → `ts = timestamp if timestamp is not None else time.time()`.
 
-```python
-@property
-def version(self) -> int:
-    return self._version
-```
-(`cache.py:92-95`) reads `self._version` without acquiring `self._lock`, unlike every other method on the class. Safe today under CPython's GIL (single `int` read is atomic), but inconsistent with the rest of the class and would become a real race under a no-GIL Python build.
+### 4.3 `PriceCache.version` read outside the lock (Severity: Low) — **Fixed**
 
-### 4.4 Module-level `router` in `stream.py` (Severity: Low)
+The `version` property now acquires `self._lock` before reading `self._version`, consistent with every other method on the class.
 
-`stream.py:17` creates a module-level `APIRouter()`, and `create_stream_router()` registers `/prices` on it via closure (`stream.py:20,26`). Calling `create_stream_router()` twice (e.g., from two tests, or twice during app startup) would register the route twice on the same shared router object. Not triggered today since it's called once at startup, but it's a footgun for the SSE integration test recommended in §4.1 — that test should be written with awareness of this shared state (e.g., import `create_stream_router` fresh per test rather than reusing a module-level router).
+### 4.4 Module-level `router` in `stream.py` (Severity: Low) — **Fixed**
 
-### 4.5 `backend/README.md` dev-install command (Severity: Trivial)
+`create_stream_router()` now constructs a fresh `APIRouter()` inside the function body on every call instead of closing over a shared module-level router, so repeated calls (multiple tests, or app startup) never double-register the route. This was also load-bearing for the new SSE test suite in §4.1, since each test constructs its own app/router.
 
-`backend/README.md:25` and `:48` both say `uv sync --dev`. `pyproject.toml` declares the dev tools under `[project.optional-dependencies] dev = [...]` — an *extra*, not a `[dependency-groups]` group — so the correct invocation is `uv sync --extra dev` (as correctly documented in `backend/CLAUDE.md`). `uv sync --dev` targets a dependency-group named `dev` that doesn't exist here, so it won't install `pytest`/`ruff`/etc. as intended.
+### 4.5 `backend/README.md` dev-install command (Severity: Trivial) — **Fixed**
+
+Both occurrences of `uv sync --dev` in `backend/README.md` now read `uv sync --extra dev`, matching `pyproject.toml` and `backend/CLAUDE.md`.
 
 ---
 
 ## 5. Verdict
 
-The market data backend is solid, well-tested, and now complete against the `PLAN.md` contract — the previously-blocking gaps (no price history for sparklines, inconsistent ticker normalization) are fixed and covered by tests, and the GBM simulator, price cache, abstract interface, factory, and SSE streaming all check out on inspection. Nothing here blocks moving on to the rest of the platform.
-
-**Should fix soon:**
-1. Add an SSE integration test for `stream.py` (§4.1) — it's the only untested module and the one the frontend directly depends on.
-
-**Nice to have:**
-2. Guard `timestamp=0.0` explicitly with `is None` instead of truthiness (§4.2).
-3. Take `self._lock` in `PriceCache.version` for consistency (§4.3).
-4. Avoid the shared module-level `router` in `stream.py`, or scope it per call (§4.4).
-5. Fix `uv sync --dev` → `uv sync --extra dev` in `backend/README.md` (§4.5).
-
-None of the above are blocking; all are minor hardening items.
+The market data backend is solid, well-tested, and complete against the `PLAN.md` contract. All items flagged in §4 — including the previously-missing SSE integration coverage — are now fixed and verified: 102 tests pass (`uv run --extra dev pytest`), and `ruff check app/ tests/` is clean. Nothing here blocks moving on to the rest of the platform.
