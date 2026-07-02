@@ -184,6 +184,45 @@ class TestMassiveDataSource:
         await source.stop()
         assert source._task is None
 
+    async def test_remove_ticker_normalizes_case(self):
+        """Test that remove_ticker() normalizes lowercase tickers."""
+        cache = PriceCache()
+        source = MassiveDataSource(api_key="test-key", price_cache=cache)
+        source._tickers = ["AAPL", "GOOGL"]
+        cache.update("AAPL", 190.00)
+
+        await source.remove_ticker("aapl")
+        assert "AAPL" not in source.get_tickers()
+        assert cache.get("AAPL") is None
+
+    async def test_get_price_history_delegates_to_cache(self):
+        """Test that get_price_history() delegates to the price cache."""
+        cache = PriceCache()
+        source = MassiveDataSource(api_key="test-key", price_cache=cache)
+        cache.update("AAPL", 190.00)
+        cache.update("AAPL", 191.00)
+
+        history = source.get_price_history("AAPL")
+        assert [u.price for u in history] == [190.00, 191.00]
+
+    async def test_get_price_history_unknown_ticker(self):
+        """Test that get_price_history() returns an empty list for unknown tickers."""
+        cache = PriceCache()
+        source = MassiveDataSource(api_key="test-key", price_cache=cache)
+
+        assert source.get_price_history("NOPE") == []
+
+    async def test_get_price_history_respects_n(self):
+        """Test that get_price_history(..., n=...) limits the number of results."""
+        cache = PriceCache()
+        source = MassiveDataSource(api_key="test-key", price_cache=cache)
+        for i in range(10):
+            cache.update("AAPL", 100.0 + i)
+
+        history = source.get_price_history("AAPL", n=3)
+        assert len(history) == 3
+        assert [u.price for u in history] == [107.0, 108.0, 109.0]
+
     async def test_start_immediate_poll(self):
         """Test that start() does an immediate poll before starting the loop."""
         cache = PriceCache()

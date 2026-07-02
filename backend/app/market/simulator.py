@@ -11,6 +11,7 @@ import numpy as np
 
 from .cache import PriceCache
 from .interface import MarketDataSource
+from .models import PriceUpdate
 from .seed_prices import (
     CORRELATION_GROUPS,
     CROSS_GROUP_CORR,
@@ -240,6 +241,7 @@ class SimulatorDataSource(MarketDataSource):
         logger.info("Simulator stopped")
 
     async def add_ticker(self, ticker: str) -> None:
+        ticker = ticker.upper().strip()
         if self._sim:
             self._sim.add_ticker(ticker)
             # Seed cache immediately so the ticker has a price right away
@@ -249,6 +251,7 @@ class SimulatorDataSource(MarketDataSource):
             logger.info("Simulator: added ticker %s", ticker)
 
     async def remove_ticker(self, ticker: str) -> None:
+        ticker = ticker.upper().strip()
         if self._sim:
             self._sim.remove_ticker(ticker)
         self._cache.remove(ticker)
@@ -256,6 +259,9 @@ class SimulatorDataSource(MarketDataSource):
 
     def get_tickers(self) -> list[str]:
         return self._sim.get_tickers() if self._sim else []
+
+    def get_price_history(self, ticker: str, n: int = 60) -> list[PriceUpdate]:
+        return self._cache.get_history(ticker, n)
 
     async def _run_loop(self) -> None:
         """Core loop: step the simulation, write to cache, sleep."""

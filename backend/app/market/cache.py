@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from threading import Lock
 
 from .models import PriceUpdate
+
+DEFAULT_HISTORY_SIZE = 60
 
 
 class PriceCache:
@@ -13,12 +16,20 @@ class PriceCache:
 
     Writers: SimulatorDataSource or MassiveDataSource (one at a time).
     Readers: SSE streaming endpoint, portfolio valuation, trade execution.
+
+    Tickers are normalized (`.upper().strip()`) on every read/write so
+    callers don't need to worry about case or whitespace consistency.
     """
 
     def __init__(self) -> None:
         self._prices: dict[str, PriceUpdate] = {}
+        self._history: dict[str, deque[PriceUpdate]] = {}
         self._lock = Lock()
         self._version: int = 0  # Monotonically increasing; bumped on every update
+
+    @staticmethod
+    def _normalize(ticker: str) -> str:
+        return ticker.upper().strip()
 
     def update(self, ticker: str, price: float, timestamp: float | None = None) -> PriceUpdate:
         """Record a new price for a ticker. Returns the created PriceUpdate.
@@ -27,6 +38,7 @@ class PriceCache:
         If this is the first update for the ticker, previous_price == price (direction='flat').
         """
         with self._lock:
+            ticker = self._normalize(ticker)
             ts = timestamp or time.time()
             prev = self._prices.get(ticker)
             previous_price = prev.price if prev else price
@@ -38,13 +50,14 @@ class PriceCache:
                 timestamp=ts,
             )
             self._prices[ticker] = update
+            self._history.setdefault(ticker, deque(maxlen=DEFAULT_HISTORY_SIZE)).append(update)
             self._version += 1
             return update
 
     def get(self, ticker: str) -> PriceUpdate | None:
         """Get the latest price for a single ticker, or None if unknown."""
         with self._lock:
-            return self._prices.get(ticker)
+            return self._prices.get(self._normalize(ticker))
 
     def get_all(self) -> dict[str, PriceUpdate]:
         """Snapshot of all current prices. Returns a shallow copy."""
@@ -56,10 +69,25 @@ class PriceCache:
         update = self.get(ticker)
         return update.price if update else None
 
+    def get_history(self, ticker: str, n: int = DEFAULT_HISTORY_SIZE) -> list[PriceUpdate]:
+        """Return up to the last `n` updates for a ticker, oldest first.
+
+        The cache only ever retains the most recent 60 updates per ticker,
+        so `n` is effectively capped at 60 regardless of the value passed.
+        Returns an empty list for unknown tickers.
+        """
+        with self._lock:
+            history = self._history.get(self._normalize(ticker))
+            if not history:
+                return []
+            return list(history)[-n:]
+
     def remove(self, ticker: str) -> None:
         """Remove a ticker from the cache (e.g., when removed from watchlist)."""
         with self._lock:
+            ticker = self._normalize(ticker)
             self._prices.pop(ticker, None)
+            self._history.pop(ticker, None)
 
     @property
     def version(self) -> int:
@@ -72,4 +100,4 @@ class PriceCache:
 
     def __contains__(self, ticker: str) -> bool:
         with self._lock:
-            return ticker in self._prices
+            return self._normalize(ticker) in self._prices
