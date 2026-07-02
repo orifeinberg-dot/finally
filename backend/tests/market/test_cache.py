@@ -101,3 +101,101 @@ class TestPriceCache:
         cache = PriceCache()
         update = cache.update("AAPL", 190.12345)
         assert update.price == 190.12
+
+    def test_update_normalizes_ticker(self):
+        """Test that update() normalizes ticker case and whitespace."""
+        cache = PriceCache()
+        update = cache.update("  aapl  ", 190.50)
+        assert update.ticker == "AAPL"
+        assert cache.get("AAPL") == update
+
+    def test_get_normalizes_ticker(self):
+        """Test that get() normalizes ticker case and whitespace."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.50)
+        assert cache.get(" aapl ") is not None
+        assert cache.get("aapl") == cache.get("AAPL")
+
+    def test_get_price_normalizes_ticker(self):
+        """Test that get_price() normalizes ticker case and whitespace."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.50)
+        assert cache.get_price("aapl") == 190.50
+
+    def test_remove_normalizes_ticker(self):
+        """Test that remove() normalizes ticker case and whitespace."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        cache.remove(" aapl ")
+        assert cache.get("AAPL") is None
+
+    def test_contains_normalizes_ticker(self):
+        """Test that __contains__ normalizes ticker case and whitespace."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        assert "aapl" in cache
+        assert " AAPL " in cache
+
+    def test_mixed_case_updates_hit_same_entry(self):
+        """Test that updates with different casing accumulate on one entry."""
+        cache = PriceCache()
+        cache.update("aapl", 190.00)
+        cache.update("AAPL", 191.00)
+        cache.update(" Aapl ", 192.00)
+        assert len(cache) == 1
+        assert cache.get_price("AAPL") == 192.00
+
+    def test_get_history_returns_updates(self):
+        """Test that get_history() returns recorded updates, oldest first."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        cache.update("AAPL", 191.00)
+        cache.update("AAPL", 192.00)
+        history = cache.get_history("AAPL")
+        assert [u.price for u in history] == [190.00, 191.00, 192.00]
+
+    def test_get_history_unknown_ticker(self):
+        """Test that get_history() returns an empty list for an unknown ticker."""
+        cache = PriceCache()
+        assert cache.get_history("NOPE") == []
+
+    def test_get_history_normalizes_ticker(self):
+        """Test that get_history() normalizes ticker case and whitespace."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        assert len(cache.get_history(" aapl ")) == 1
+
+    def test_get_history_capped_at_60(self):
+        """Test that history is capped at 60 updates per ticker."""
+        cache = PriceCache()
+        for i in range(100):
+            cache.update("AAPL", 100.0 + i)
+        history = cache.get_history("AAPL", n=100)
+        assert len(history) == 60
+        # Oldest entries should have been evicted; the most recent 60 remain.
+        assert [u.price for u in history] == [100.0 + i for i in range(40, 100)]
+
+    def test_get_history_with_n(self):
+        """Test get_history(..., n=...) limits the number of returned updates."""
+        cache = PriceCache()
+        for i in range(10):
+            cache.update("AAPL", 100.0 + i)
+        history = cache.get_history("AAPL", n=3)
+        assert [u.price for u in history] == [107.0, 108.0, 109.0]
+
+    def test_get_history_independent_per_ticker(self):
+        """Test that history is tracked independently per ticker."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        cache.update("GOOGL", 175.00)
+        cache.update("GOOGL", 176.00)
+        assert len(cache.get_history("AAPL")) == 1
+        assert len(cache.get_history("GOOGL")) == 2
+
+    def test_remove_clears_history(self):
+        """Test that remove() clears the ticker's history too."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        cache.update("AAPL", 191.00)
+        cache.remove("AAPL")
+        assert cache.get_history("AAPL") == []

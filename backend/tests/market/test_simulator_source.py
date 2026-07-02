@@ -124,6 +124,53 @@ class TestSimulatorDataSource:
 
         await source.stop()
 
+    async def test_add_ticker_normalizes_case_and_whitespace(self):
+        """Test that add_ticker() normalizes ticker case and whitespace."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["AAPL"])
+
+        await source.add_ticker("  tsla  ")
+        assert "TSLA" in source.get_tickers()
+        assert cache.get("TSLA") is not None
+
+        await source.stop()
+
+    async def test_remove_ticker_normalizes_case_and_whitespace(self):
+        """Test that remove_ticker() normalizes ticker case and whitespace."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["AAPL", "TSLA"])
+
+        await source.remove_ticker("  tsla  ")
+        assert "TSLA" not in source.get_tickers()
+        assert cache.get("TSLA") is None
+
+        await source.stop()
+
+    async def test_get_price_history(self):
+        """Test that get_price_history() delegates to the price cache."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.05)
+        await source.start(["AAPL"])
+
+        await asyncio.sleep(0.2)  # Accumulate a few updates
+        history = source.get_price_history("AAPL")
+        assert len(history) >= 1
+        assert history == cache.get_history("AAPL")
+
+        await source.stop()
+
+    async def test_get_price_history_unknown_ticker(self):
+        """Test that get_price_history() returns an empty list for an unknown ticker."""
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["AAPL"])
+
+        assert source.get_price_history("NOPE") == []
+
+        await source.stop()
+
     async def test_custom_event_probability(self):
         """Test creating source with custom event probability."""
         cache = PriceCache()

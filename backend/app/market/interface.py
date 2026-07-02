@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from .models import PriceUpdate
+
 
 class MarketDataSource(ABC):
     """Contract for market data providers.
@@ -55,3 +57,11 @@ class MarketDataSource(ABC):
     @abstractmethod
     def get_tickers(self) -> list[str]:
         """Return the current list of actively tracked tickers."""
+
+    @abstractmethod
+    def get_price_history(self, ticker: str, n: int = 60) -> list[PriceUpdate]:
+        """Return up to the last `n` price updates for a ticker, oldest first.
+
+        Backed by the shared PriceCache's rolling history. Returns an empty
+        list if the ticker is unknown.
+        """

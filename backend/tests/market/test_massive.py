@@ -184,6 +184,37 @@ class TestMassiveDataSource:
         await source.stop()
         assert source._task is None
 
+    async def test_get_price_history(self):
+        """Test that get_price_history() delegates to the price cache."""
+        cache = PriceCache()
+        source = MassiveDataSource(
+            api_key="test-key",
+            price_cache=cache,
+            poll_interval=60.0,
+        )
+        source._tickers = ["AAPL"]
+        source._client = MagicMock()
+
+        mock_snapshots = [
+            _make_snapshot("AAPL", 190.50, 1707580800000),
+            _make_snapshot("AAPL", 191.00, 1707580801000),
+        ]
+        with patch.object(source, "_fetch_snapshots", return_value=mock_snapshots[:1]):
+            await source._poll_once()
+        with patch.object(source, "_fetch_snapshots", return_value=mock_snapshots[1:]):
+            await source._poll_once()
+
+        history = source.get_price_history("AAPL")
+        assert [u.price for u in history] == [190.50, 191.00]
+        assert history == cache.get_history("AAPL")
+
+    async def test_get_price_history_unknown_ticker(self):
+        """Test that get_price_history() returns an empty list for an unknown ticker."""
+        cache = PriceCache()
+        source = MassiveDataSource(api_key="test-key", price_cache=cache)
+
+        assert source.get_price_history("NOPE") == []
+
     async def test_start_immediate_poll(self):
         """Test that start() does an immediate poll before starting the loop."""
         cache = PriceCache()
