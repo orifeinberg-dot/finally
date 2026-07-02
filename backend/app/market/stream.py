@@ -14,14 +14,19 @@ from .cache import PriceCache
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/stream", tags=["streaming"])
 
-
-def create_stream_router(price_cache: PriceCache) -> APIRouter:
+def create_stream_router(price_cache: PriceCache, interval: float = 0.5) -> APIRouter:
     """Create the SSE streaming router with a reference to the price cache.
 
     This factory pattern lets us inject the PriceCache without globals.
+    A fresh APIRouter is created on every call so repeated invocations
+    (e.g. from multiple tests, or twice during app startup) don't register
+    the route twice on a shared router instance.
+
+    `interval` controls how often the stream polls the cache for changes;
+    it defaults to 500ms but can be shortened in tests for fast execution.
     """
+    router = APIRouter(prefix="/api/stream", tags=["streaming"])
 
     @router.get("/prices")
     async def stream_prices(request: Request) -> StreamingResponse:
@@ -36,7 +41,7 @@ def create_stream_router(price_cache: PriceCache) -> APIRouter:
         disconnection (EventSource built-in behavior).
         """
         return StreamingResponse(
-            _generate_events(price_cache, request),
+            _generate_events(price_cache, request, interval=interval),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
